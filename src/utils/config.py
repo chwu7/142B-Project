@@ -41,6 +41,6 @@ TEST_SPLIT      = 0.15
 # ── Paths ─────────────────────────────────────────────────────────────
 import os
 ROOT_DIR        = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
-DATA_RAW_DIR    = os.path.join(ROOT_DIR, "data", "raw")
-DATA_PROC_DIR   = os.path.join(ROOT_DIR, "data", "processed")
+DATA_RAW_DIR    = os.path.join(ROOT_DIR, "src", "data", "raw")
+DATA_PROC_DIR   = os.path.join(ROOT_DIR, "src", "data", "processed")
 EXPERIMENTS_DIR = os.path.join(ROOT_DIR, "experiments")

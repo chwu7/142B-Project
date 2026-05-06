@@ -30,6 +30,7 @@ def assign_label(abnormal_return: float) -> int:
         return 1
 
 
+
 def main():
     os.makedirs(DATA_PROC_DIR, exist_ok=True)
     df = pd.read_parquet(RETURNS_PATH)
