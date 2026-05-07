@@ -130,7 +130,7 @@ def main():
     combined = pd.concat(all_returns, ignore_index=True)
     os.makedirs(os.path.dirname(OUT_PATH), exist_ok=True)
     combined.to_parquet(OUT_PATH, index=False)
-    print(f"Saved returns for {len(combined)} calls → {OUT_PATH}")
+    print(f"Saved returns for {len(combined)} calls -> {OUT_PATH}")
 
 
 if __name__ == "__main__":

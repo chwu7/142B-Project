@@ -30,6 +30,7 @@ HIER_FF_DIM     = 1024
 
 # ── Training ──────────────────────────────────────────────────────────
 BATCH_SIZE      = 16
+NUM_WORKERS     = 2
 LEARNING_RATE   = 2e-5
 WEIGHT_DECAY    = 1e-2
 MAX_EPOCHS      = 10

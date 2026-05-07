@@ -19,12 +19,12 @@ import os
 import json
 import torch
 import pandas as pd
-from torch.utils.data import Dataset, DataLoader, random_split
+from torch.utils.data import Dataset, DataLoader, Subset
 from src.data.chunker import chunk_transcript_to_tensors
 from src.utils.config import (
     DATA_RAW_DIR, DATA_PROC_DIR,
     TRAIN_SPLIT, VAL_SPLIT, TEST_SPLIT,
-    BATCH_SIZE,
+    BATCH_SIZE, NUM_WORKERS,
 )
 
 TRANSCRIPTS_DIR = os.path.join(DATA_RAW_DIR, "transcripts")
@@ -50,7 +50,7 @@ class EarningsDataset(Dataset):
     def __getitem__(self, idx):
         row = self.index.iloc[idx]
         ticker    = row["ticker"]
-        call_date = row["call_date"]
+        call_date = str(row["call_date"])[:10]  # coerce Timestamp → "YYYY-MM-DD"
         label     = int(row["label"])
 
         # Try cache first
@@ -58,7 +58,7 @@ class EarningsDataset(Dataset):
         cache_path = os.path.join(self.cache_dir, f"{cache_key}.pt")
 
         if self.cache and os.path.exists(cache_path):
-            cached = torch.load(cache_path)
+            cached = torch.load(cache_path, weights_only=False)
             chunks = cached["chunks"]
             mask   = cached["attention_mask"]
         else:
@@ -117,21 +117,26 @@ def collate_fn(batch):
 
 def get_dataloaders(index_path: str = INDEX_PATH, seed: int = 42):
     """
-    Returns (train_loader, val_loader, test_loader) with the standard splits.
+    Returns (train_loader, val_loader, test_loader) with chronological splits.
+    Sorted by call_date so train = oldest, test = most recent (no leakage).
     """
     dataset = EarningsDataset(index_path=index_path)
-    n       = len(dataset)
+    # Sort by date so splits are chronological, not random
+    sorted_idx = dataset.index["call_date"].argsort().tolist()
+    n       = len(sorted_idx)
     n_train = int(n * TRAIN_SPLIT)
     n_val   = int(n * VAL_SPLIT)
-    n_test  = n - n_train - n_val
 
-    train_set, val_set, test_set = random_split(
-        dataset, [n_train, n_val, n_test],
-        generator=torch.Generator().manual_seed(seed),
-    )
+    train_indices = sorted_idx[:n_train]
+    val_indices   = sorted_idx[n_train:n_train + n_val]
+    test_indices  = sorted_idx[n_train + n_val:]
 
-    train_loader = DataLoader(train_set, batch_size=BATCH_SIZE, shuffle=True,  collate_fn=collate_fn)
-    val_loader   = DataLoader(val_set,   batch_size=BATCH_SIZE, shuffle=False, collate_fn=collate_fn)
-    test_loader  = DataLoader(test_set,  batch_size=BATCH_SIZE, shuffle=False, collate_fn=collate_fn)
+    train_set = Subset(dataset, train_indices)
+    val_set   = Subset(dataset, val_indices)
+    test_set  = Subset(dataset, test_indices)
+
+    train_loader = DataLoader(train_set, batch_size=BATCH_SIZE, shuffle=True,  collate_fn=collate_fn, num_workers=NUM_WORKERS)
+    val_loader   = DataLoader(val_set,   batch_size=BATCH_SIZE, shuffle=False, collate_fn=collate_fn, num_workers=NUM_WORKERS)
+    test_loader  = DataLoader(test_set,  batch_size=BATCH_SIZE, shuffle=False, collate_fn=collate_fn, num_workers=NUM_WORKERS)
 
     return train_loader, val_loader, test_loader

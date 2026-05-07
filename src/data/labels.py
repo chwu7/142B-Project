@@ -43,7 +43,7 @@ def main():
     print(f"\nTotal calls: {len(df)}")
 
     df.to_parquet(OUT_PATH, index=False)
-    print(f"\nMaster index saved → {OUT_PATH}")
+    print(f"\nMaster index saved -> {OUT_PATH}")
 
 
 if __name__ == "__main__":

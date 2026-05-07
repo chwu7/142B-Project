@@ -5,8 +5,13 @@ OWNER: Person 2 (Preprocessing)
 Splits a raw transcript string into overlapping token chunks
 suitable for FinBERT (max 512 tokens, we use 450 + 50 overlap).
 """
+import transformers
 from transformers import AutoTokenizer
 from src.utils.config import FINBERT_MODEL, CHUNK_SIZE, CHUNK_OVERLAP, MAX_CHUNKS
+
+# Suppress the "sequence length > 512" warning — we intentionally tokenize the
+# full transcript before slicing it into chunks ourselves.
+transformers.logging.set_verbosity_error()
 
 
 _tokenizer = None
@@ -27,6 +32,9 @@ def chunk_transcript(text: str) -> list[dict]:
 
     Each chunk has exactly CHUNK_SIZE tokens (padded if needed).
     """
+    if not text or not text.strip():
+        raise ValueError("chunk_transcript received empty or whitespace-only text")
+
     tokenizer = get_tokenizer()
 
     # Tokenize the full transcript without truncation

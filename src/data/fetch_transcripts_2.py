@@ -140,7 +140,7 @@ def main():
         save_transcript(t)
         saved += 1
 
-    print(f"Saved {saved} transcript(s) → {OUT_DIR}")
+    print(f"Saved {saved} transcript(s) -> {OUT_DIR}")
     if skipped:
         print(f"Skipped {skipped} transcript(s) outside configured tickers/date range.")
 
