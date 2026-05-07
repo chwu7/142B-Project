@@ -71,14 +71,14 @@ Open notebooks in Colab:
 
 ## Data Setup
 
-1. Get a free API key from [FinancialModelingPrep](https://financialmodelingprep.com/developer/docs/)
-2. Copy `.env.example` to `.env` and fill in your key
+1. Place the local transcript txt dataset under `src/data/NLP_Dataset/`, or set `KAGGLE_TRANSCRIPTS_DIR` in `.env`
+2. Copy `.env.example` to `.env` and update paths if needed
 3. Run the data pipeline:
 
 ```bash
-python src/data/fetch_transcripts.py     # downloads raw transcripts
-python src/data/fetch_returns.py         # downloads post-call returns
-python src/data/labels.py               # constructs labels
+python -m src.data.fetch_transcripts_2   # converts local txt transcripts to JSON
+python -m src.data.fetch_returns         # downloads post-call returns
+python -m src.data.labels                # constructs labels
 ```
 
 > ⚠️ Raw data is gitignored. Every team member must run the pipeline locally (or pull from a shared Google Drive link).

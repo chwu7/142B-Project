@@ -44,8 +44,9 @@ class MeanPoolingHead(nn.Module):
     Baseline aggregation: mean-pool chunk embeddings, then classify.
     Replace this with HierarchicalTransformer from Person 4 for the full model.
 
-    Input:  chunk_embeddings [B, num_chunks, HIDDEN_DIM]
-    Output: logits           [B, NUM_CLASSES]
+    Input:  chunk_embeddings   [B, num_chunks, HIDDEN_DIM]
+            chunk_padding_mask [B, num_chunks] bool, True for padded chunks
+    Output: logits             [B, NUM_CLASSES]
     """
     def __init__(self):
         super().__init__()
@@ -56,10 +57,16 @@ class MeanPoolingHead(nn.Module):
             nn.Linear(HIDDEN_DIM // 2, NUM_CLASSES),
         )
 
-    def forward(self, chunk_embeddings):
-        # Simple mean pooling across chunks
-        pooled = chunk_embeddings.mean(dim=1)   # [B, HIDDEN_DIM]
-        return self.classifier(pooled)           # [B, NUM_CLASSES]
+    def forward(self, chunk_embeddings, chunk_padding_mask=None):
+        if chunk_padding_mask is None:
+            pooled = chunk_embeddings.mean(dim=1)  # [B, HIDDEN_DIM]
+        else:
+            valid_chunks = (~chunk_padding_mask).unsqueeze(-1).to(chunk_embeddings.dtype)
+            summed = (chunk_embeddings * valid_chunks).sum(dim=1)
+            counts = valid_chunks.sum(dim=1).clamp_min(1.0)
+            pooled = summed / counts
+
+        return self.classifier(pooled)  # [B, NUM_CLASSES]
 
 
 class BaselineModel(nn.Module):
@@ -82,11 +89,14 @@ class BaselineModel(nn.Module):
         """
         B, N, L = chunks.shape
 
-        # Flatten batch × chunks for parallel BERT encoding
-        flat_ids  = chunks.view(B * N, L)
-        flat_mask = attention_mask.view(B * N, L)
+        # Flatten batch x chunks for parallel BERT encoding.
+        flat_ids  = chunks.reshape(B * N, L)
+        flat_mask = attention_mask.reshape(B * N, L)
 
         embeddings = self.encoder(flat_ids, flat_mask)  # [B*N, HIDDEN_DIM]
-        embeddings = embeddings.view(B, N, -1)           # [B, N, HIDDEN_DIM]
+        embeddings = embeddings.reshape(B, N, -1)        # [B, N, HIDDEN_DIM]
 
-        return self.head(embeddings)
+        # A chunk is padding if every token position was added by collate_fn.
+        chunk_is_pad = attention_mask.sum(dim=-1) == 0   # [B, N]
+
+        return self.head(embeddings, chunk_padding_mask=chunk_is_pad)
