@@ -64,7 +64,7 @@ def train(model_name: str = "hierarchical", run_name: str = None):
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=MAX_EPOCHS)
     criterion = nn.CrossEntropyLoss()
 
-    train_loader, val_loader, _ = get_dataloaders()
+    train_loader, val_loader, test_loader = get_dataloaders()
 
     best_val_loss = float("inf")
     patience_counter = 0
@@ -116,6 +116,19 @@ def train(model_name: str = "hierarchical", run_name: str = None):
             if patience_counter >= PATIENCE:
                 print(f"Early stopping at epoch {epoch}")
                 break
+                
+    # ── Final Test Evaluation ──
+    test_loss, test_metrics = evaluate(model, test_loader, criterion, device)
+    
+    print("\nFinal Test Results")
+    print(f"test_loss={test_loss:.4f}")
+    for k, v in test_metrics.items():
+        print(f"{k}: {v:.4f}")
+    
+    wandb.log({
+        "test_loss": test_loss,
+        **{f"test_{k}": v for k, v in test_metrics.items()},
+    })
 
     wandb.finish()
 
