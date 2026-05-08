@@ -1,6 +1,6 @@
 """
 src/models/hierarchical.py
-OWNER: Person 4 (Hierarchical transformer — the 'advanced' component)
+Hierarchical transformer — the 'advanced' component
 
 Second-level transformer that aggregates chunk-level FinBERT embeddings
 into a call-level representation, then classifies.
@@ -12,7 +12,7 @@ Architecture:
     4. CLS-token or mean-pool → [B, HIDDEN_DIM]
     5. Classification head → [B, NUM_CLASSES]
 """
-import math
+
 import torch
 import torch.nn as nn
 from src.models.finbert_head import ChunkEncoder
@@ -30,7 +30,7 @@ class ChunkPositionalEncoding(nn.Module):
         self.pos_embedding = nn.Embedding(max_chunks + 1, HIDDEN_DIM)  # +1 for CLS
 
     def forward(self, x):
-        """x: [B, num_chunks, HIDDEN_DIM]"""
+        """x: [B, seq_len, HIDDEN_DIM], where seq_len may include CLS."""
         B, N, _ = x.shape
         positions = torch.arange(N, device=x.device).unsqueeze(0).expand(B, -1)
         return x + self.pos_embedding(positions)
@@ -121,11 +121,11 @@ class HierarchicalModel(nn.Module):
         """
         B, N, L = chunks.shape
 
-        flat_ids  = chunks.view(B * N, L)
-        flat_mask = attention_mask.view(B * N, L)
+        flat_ids  = chunks.reshape(B * N, L)
+        flat_mask = attention_mask.reshape(B * N, L)
 
         embeddings = self.encoder(flat_ids, flat_mask)  # [B*N, HIDDEN_DIM]
-        embeddings = embeddings.view(B, N, -1)           # [B,   N, HIDDEN_DIM]
+        embeddings = embeddings.reshape(B, N, -1)           # [B,   N, HIDDEN_DIM]
 
         # Build chunk padding mask: a chunk is padding if all tokens are pad (mask=0)
         chunk_is_pad = (attention_mask.sum(dim=-1) == 0)  # [B, N]
