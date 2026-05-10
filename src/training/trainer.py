@@ -18,7 +18,7 @@ from dotenv import load_dotenv
 from src.data.dataset import get_dataloaders
 from src.training.evaluate import compute_metrics
 from src.utils.config import (
-    LEARNING_RATE, WEIGHT_DECAY, MAX_EPOCHS, PATIENCE,
+    LEARNING_RATE, WEIGHT_DECAY, MAX_EPOCHS,
     EXPERIMENTS_DIR, NUM_CLASSES,
 )
 from src.utils.io import save_checkpoint
@@ -54,7 +54,6 @@ def train(model_name: str = "hierarchical", run_name: str = None):
             "lr": LEARNING_RATE,
             "weight_decay": WEIGHT_DECAY,
             "max_epochs": MAX_EPOCHS,
-            "patience": PATIENCE,
         },
     )
 
@@ -74,7 +73,6 @@ def train(model_name: str = "hierarchical", run_name: str = None):
     train_loader, val_loader, test_loader = get_dataloaders()
 
     best_val_loss = float("inf")
-    patience_counter = 0
     ckpt_dir = os.path.join(EXPERIMENTS_DIR, model_name)
     os.makedirs(ckpt_dir, exist_ok=True)
 
@@ -111,18 +109,11 @@ def train(model_name: str = "hierarchical", run_name: str = None):
             **{f"val_{k}": v for k, v in val_metrics.items()},
         })
 
-        # ── Early stopping ──
         if val_loss < best_val_loss:
             best_val_loss = val_loss
-            patience_counter = 0
             save_checkpoint(model, optimizer, epoch,
                             {"val_loss": val_loss, **val_metrics},
                             os.path.join(ckpt_dir, "best.pt"))
-        else:
-            patience_counter += 1
-            if patience_counter >= PATIENCE:
-                print(f"Early stopping at epoch {epoch}")
-                break
                 
     # ── Final Test Evaluation ──
     test_loss, test_metrics = evaluate(model, test_loader, criterion, device)

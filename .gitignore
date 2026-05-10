@@ -30,7 +30,6 @@ env/
 # Jupyter
 .ipynb_checkpoints/
 *.ipynb_checkpoints
-notebooks/142B_Project.ipynb
 
 # IDE
 .vscode/
@@ -39,3 +38,6 @@ notebooks/142B_Project.ipynb
 
 # W&B
 wandb/
+
+# Notebook with Keys
+notebooks/142B_Project.ipynb
