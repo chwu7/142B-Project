@@ -15,7 +15,7 @@ RETURN_WINDOW_DAYS = 2  # days after market open to measure return
 # ── Chunking ──────────────────────────────────────────────────────────
 CHUNK_SIZE    = 450     # tokens per chunk (leaves room for [CLS]/[SEP])
 CHUNK_OVERLAP = 50      # overlapping tokens between adjacent chunks
-MAX_CHUNKS    = 32      # cap per transcript to limit memory
+MAX_CHUNKS    = 16      # cap per transcript to limit memory
 
 # ── Model ─────────────────────────────────────────────────────────────
 FINBERT_MODEL = "ProsusAI/finbert"
@@ -29,7 +29,7 @@ HIER_NUM_LAYERS = 2
 HIER_FF_DIM     = 1024
 
 # ── Training ──────────────────────────────────────────────────────────
-BATCH_SIZE      = 16
+BATCH_SIZE      = 4
 NUM_WORKERS     = 2
 LEARNING_RATE   = 2e-5
 WEIGHT_DECAY    = 1e-2
