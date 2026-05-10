@@ -131,3 +131,43 @@ class HierarchicalModel(nn.Module):
         chunk_is_pad = (attention_mask.sum(dim=-1) == 0)  # [B, N]
 
         return self.aggregator(embeddings, chunk_padding_mask=chunk_is_pad)
+
+
+class MeanPoolModel(nn.Module):
+    """
+    Simpler alternative to HierarchicalModel: mean-pool chunk embeddings → classify.
+    No second-level transformer — far fewer parameters for small datasets.
+    Uses freeze_layers=3 by default to allow more FinBERT fine-tuning.
+    """
+    def __init__(self, freeze_layers: int = 3):
+        super().__init__()
+        self.encoder = ChunkEncoder(freeze_layers=freeze_layers)
+        self.classifier = nn.Sequential(
+            nn.LayerNorm(HIDDEN_DIM),
+            nn.Linear(HIDDEN_DIM, HIDDEN_DIM // 2),
+            nn.GELU(),
+            nn.Dropout(DROPOUT),
+            nn.Linear(HIDDEN_DIM // 2, NUM_CLASSES),
+        )
+
+    def forward(self, chunks, attention_mask):
+        """
+        Args:
+            chunks:         [B, num_chunks, seq_len]
+            attention_mask: [B, num_chunks, seq_len]
+        Returns:
+            logits: [B, NUM_CLASSES]
+        """
+        B, N, L = chunks.shape
+        flat_ids  = chunks.reshape(B * N, L)
+        flat_mask = attention_mask.reshape(B * N, L)
+
+        embeddings = self.encoder(flat_ids, flat_mask)  # [B*N, HIDDEN_DIM]
+        embeddings = embeddings.reshape(B, N, -1)        # [B, N, HIDDEN_DIM]
+
+        # Masked mean-pool: exclude padding chunks from the average
+        chunk_is_real = (attention_mask.sum(dim=-1) > 0).float()          # [B, N]
+        denom  = chunk_is_real.sum(dim=1, keepdim=True).clamp(min=1)
+        pooled = (embeddings * chunk_is_real.unsqueeze(-1)).sum(dim=1) / denom  # [B, HIDDEN_DIM]
+
+        return self.classifier(pooled)

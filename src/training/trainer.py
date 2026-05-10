@@ -33,6 +33,9 @@ def get_model(model_name: str):
     elif model_name == "hierarchical":
         from src.models.hierarchical import HierarchicalModel
         return HierarchicalModel()
+    elif model_name == "meanpool":
+        from src.models.hierarchical import MeanPoolModel
+        return MeanPoolModel()
     else:
         raise ValueError(f"Unknown model: {model_name}")
 
@@ -56,11 +59,15 @@ def train(model_name: str = "hierarchical", run_name: str = None):
     )
 
     model = get_model(model_name).to(device)
-    optimizer = torch.optim.AdamW(
-        filter(lambda p: p.requires_grad, model.parameters()),
-        lr=LEARNING_RATE,
-        weight_decay=WEIGHT_DECAY,
-    )
+
+    # Differential LRs: FinBERT encoder gets 10x smaller LR to protect pretrained weights
+    encoder_params = [p for p in model.encoder.parameters() if p.requires_grad]
+    encoder_ids    = {id(p) for p in encoder_params}
+    head_params    = [p for p in model.parameters() if p.requires_grad and id(p) not in encoder_ids]
+    optimizer = torch.optim.AdamW([
+        {"params": encoder_params, "lr": LEARNING_RATE * 0.1},
+        {"params": head_params,    "lr": LEARNING_RATE},
+    ], weight_decay=WEIGHT_DECAY)
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=MAX_EPOCHS)
     criterion = nn.CrossEntropyLoss()
 
@@ -159,7 +166,7 @@ def evaluate(model, loader, criterion, device):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--model", default="hierarchical", choices=["baseline", "hierarchical"])
+    parser.add_argument("--model", default="hierarchical", choices=["baseline", "hierarchical", "meanpool"])
     parser.add_argument("--run-name", default=None)
     args = parser.parse_args()
     train(model_name=args.model, run_name=args.run_name)
