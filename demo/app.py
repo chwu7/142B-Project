@@ -15,7 +15,7 @@ import torch
 import gradio as gr
 
 # Load model once at startup
-MODEL_PATH = os.getenv("HF_MODEL_PATH", "experiments/hierarchical/best.pt")
+MODEL_PATH = os.getenv("HF_MODEL_PATH", "experiments/hierarchical/earnings-sentiment/hierarchical.pt")
 LABEL_NAMES = ["📉 Down", "➡️ Flat", "📈 Up"]
 LABEL_COLORS = ["#ff4444", "#aaaaaa", "#44bb44"]
 
