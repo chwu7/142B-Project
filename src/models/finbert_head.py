@@ -51,6 +51,7 @@ class MeanPoolingHead(nn.Module):
     def __init__(self):
         super().__init__()
         self.classifier = nn.Sequential(
+            nn.LayerNorm(HIDDEN_DIM), #added for the demo
             nn.Linear(HIDDEN_DIM, HIDDEN_DIM // 2),
             nn.GELU(),
             nn.Dropout(DROPOUT),

@@ -1,3 +1,9 @@
+---
+title: 142B-Project
+app_file: demo/app_best.py
+sdk: gradio
+sdk_version: 6.14.0
+---
 # Earnings Call Sentiment Analysis for Stock Return Prediction
 
 Predicting post-earnings stock movement using NLP on earnings call transcripts.  

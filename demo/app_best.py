@@ -1,26 +1,4 @@
-"""
-demo/app.py
-OWNER: Person 5 (Training loop, eval, demo)
 
-HuggingFace Spaces Gradio demo.
-Paste an earnings call transcript → get predicted market reaction
-+ highlighted saliency showing which phrases drove the prediction.
-
-Deploy:
-    1. Create a new Space on huggingface.co (Gradio SDK)
-    2. Push this file + requirements.txt + your model checkpoint
-    3. Set HF_MODEL_PATH secret in Space settings
-
-Explanation method:
-    Hierarchical model: two-level attention rollout
-      1. Hierarchical transformer CLS-token attention → top-k influential chunks
-      2. Gradient × input saliency on FinBERT token embeddings → top phrases per chunk
-    Mean pool model: gradient-based chunk scoring
-      1. Gradient magnitude through mean pooling → chunk importance scores
-      2. Gradient × input saliency on FinBERT token embeddings → top phrases per chunk
-
-    Set MODEL_TYPE = "hierarchical" or "meanpool" below to match your checkpoint.
-"""
 import os
 import re
 import html
@@ -28,7 +6,7 @@ import torch
 import numpy as np
 import gradio as gr
 
-MODEL_TYPE  = os.getenv("MODEL_TYPE", "hierarchical")   # "hierarchical" or "meanpool"
+MODEL_TYPE  = os.getenv("MODEL_TYPE", "meanpool")   # "hierarchical" or "meanpool"
 MODEL_PATH  = os.getenv("HF_MODEL_PATH", f"experiments/hierarchical/earnings-sentiment/best_meanpool_noearlystop.pt")
 LABEL_NAMES = ["📉 Down", "➡️ Flat", "📈 Up"]
 LABEL_COLORS = ["#ff4444", "#aaaaaa", "#44bb44"]
@@ -42,26 +20,22 @@ SALIENCY_FLAT = "136, 135, 128"  # neutral gray
 # ── Model loading ─────────────────────────────────────────────────────
 
 def load_model():
-    # Checkpoint was saved from HierarchicalTransformer directly,
-    # so always load HierarchicalModel regardless of MODEL_TYPE
-    from src.models.hierarchical import HierarchicalModel
-    model = HierarchicalModel()
+    from src.models.finbert_head import BaselineModel
+    model = BaselineModel()
 
     ckpt = torch.load(MODEL_PATH, map_location="cpu")
     state_dict = ckpt["model_state_dict"]
 
-    # Remap classifier.* → aggregator.classifier.*
-    # and encoder.* stays as encoder.*
+    # Remap classifier.* → head.classifier.*
     if any(k.startswith("classifier.") for k in state_dict):
         state_dict = {
-            ("aggregator." + k if k.startswith("classifier.") else k): v
+            ("head." + k if k.startswith("classifier.") else k): v
             for k, v in state_dict.items()
         }
 
     model.load_state_dict(state_dict)
     model.eval()
     return model
-
 
 
 MODEL = None
@@ -120,27 +94,35 @@ def _chunk_attention_scores(model, input_ids, attention_mask):
 
 def _chunk_gradient_scores(model, input_ids, attention_mask, predicted_class):
     """
-    Score chunks by gradient magnitude through mean pooling.
-    Used for BaselineModel (MeanPoolingHead) which has no attention to hook into.
-
-    Returns: numpy array of shape [num_chunks].
+    Score chunks by how much masking each one changes the logit.
+    More reliable than gradient-through-mean which gives uniform scores.
     """
     B, N, L = input_ids.shape
     flat_ids  = input_ids.view(B * N, L)
     flat_mask = attention_mask.view(B * N, L)
 
     with torch.no_grad():
-        embeddings_detached = model.encoder(flat_ids, flat_mask).view(B, N, -1)
+        all_embeds = model.encoder(flat_ids, flat_mask).view(B, N, -1)  # [B, N, H]
+        baseline_logit = model.head.classifier(
+            all_embeds.mean(dim=1)
+        )[0, predicted_class].item()
 
-    embeddings = embeddings_detached.detach().requires_grad_(True)
-    pooled = embeddings.mean(dim=1)              # [B, H]
-    logits = model.head.classifier(pooled)       # [B, 3]
-    logits[0, predicted_class].backward()
+        scores = []
+        for i in range(N):
+            # Mask out chunk i and recompute
+            masked = all_embeds.clone()
+            masked[0, i] = 0.0
+            logit_i = model.head.classifier(
+                masked.mean(dim=1)
+            )[0, predicted_class].item()
+            # Importance = how much the logit drops when this chunk is removed
+            scores.append(baseline_logit - logit_i)
 
-    chunk_scores = embeddings.grad[0].norm(dim=-1)   # [N]
-    chunk_scores = chunk_scores.detach().cpu().numpy()
-    chunk_scores = chunk_scores / (chunk_scores.sum() + 1e-9)
-    return chunk_scores
+    scores = np.array(scores)
+    # Shift so minimum is 0, then normalise
+    scores = scores - scores.min()
+    scores = scores / (scores.sum() + 1e-9)
+    return scores
 
 
 def _get_chunk_scores(model, input_ids, attention_mask, predicted_class):
@@ -153,38 +135,31 @@ def _get_chunk_scores(model, input_ids, attention_mask, predicted_class):
 
 def _token_saliency(model, input_ids, attention_mask, target_class):
     """
-    Gradient × input saliency at the token embedding level within a single chunk.
-
-    Returns: numpy array of shape [seq_len] with non-negative importance scores.
+    Gradient x input saliency using a single full forward pass.
+    Hooks into embedding output to capture gradients without manually
+    iterating BERT layers.
     """
-    embeddings = model.encoder.bert.embeddings(input_ids)   # [1, L, H]
-    embeddings = embeddings.detach().requires_grad_(True)
+    captured = {}
 
-    # Forward from embeddings (skip the embedding lookup layer)
-    extended_mask = model.encoder.bert.get_extended_attention_mask(
-        attention_mask, input_ids.shape
-    )
-    hidden = embeddings
-    for layer in model.encoder.bert.encoder.layer:
-        hidden = layer(hidden, extended_mask)[0]
+    def _forward_hook(module, input, output):
+        # Detach from the no_grad graph and re-attach with grad
+        output_with_grad = output.detach().requires_grad_(True)
+        captured['embeddings'] = output_with_grad
+        return output_with_grad  # return modified output into the rest of the network
 
-    cls_vec = hidden[:, 0, :]                        # [1, H]
+    hook = model.encoder.bert.embeddings.register_forward_hook(_forward_hook)
 
-    if MODEL_TYPE == "meanpool":
-        # MeanPoolingHead: single chunk acts as its own pool
-        logit = model.head.classifier(cls_vec)[0, target_class]
-    else:
-        # HierarchicalModel: route CLS through the hierarchical aggregator head
-        logit = model.aggregator.classifier(
-            model.aggregator.transformer(
-                torch.cat([model.aggregator.cls_token, cls_vec.unsqueeze(1)], dim=1)
-            )[:, 0, :]
-        )[0, target_class]
-
+    # Single full forward pass — no manual layer iteration
+    out = model.encoder.bert(input_ids=input_ids, attention_mask=attention_mask)
+    cls_vec = out.last_hidden_state[:, 0, :]
+    logit = model.head.classifier(cls_vec)[0, target_class]
     logit.backward()
 
-    grad = embeddings.grad[0]                        # [L, H]
-    saliency = (grad * embeddings[0].detach()).norm(dim=-1)  # [L]
+    hook.remove()
+
+    emb = captured['embeddings']
+    grad = emb.grad[0]                              # [L, H]
+    saliency = (grad * emb[0].detach()).norm(dim=-1) # [L]
     return saliency.detach().cpu().numpy()
 
 
@@ -205,9 +180,11 @@ def compute_saliency(model, input_ids, attention_mask, predicted_class):
         chunk_mask = attention_mask[0, i].unsqueeze(0)
         try:
             ts = _token_saliency(model, chunk_ids, chunk_mask, predicted_class)
-        except Exception:
+        except Exception as e:
+            print(f"chunk {i} saliency error: {type(e).__name__}: {e}")  # ← add this for debugging
             ts = np.zeros(input_ids.shape[-1])
         token_scores.append(ts)
+    
 
     return chunk_scores, token_scores
 
@@ -398,7 +375,7 @@ def predict_and_explain(transcript: str):
         chunk_scores, token_scores, predicted_class, top_chunks=top_chunks
     )
 
-    color_hex = LABEL_COLORS[predicted_class]
+    color_rgb = LABEL_COLORS[predicted_class]
     label_name = LABEL_NAMES[predicted_class]
 
     highlighted_html = f"""
@@ -415,7 +392,7 @@ def predict_and_explain(transcript: str):
     border-radius: 8px;
     background: #fafafa;
   }}
-  .chunk-dim {{ color: #888; }}
+  .chunk-dim {{ color: #111; }}  #was #888
   .chunk-top {{ color: #1a1a1a; }}
   .legend {{
     display: flex; align-items: center; gap: 8px;
@@ -561,7 +538,7 @@ with gr.Blocks(title="Earnings Call Sentiment Analyzer", theme=gr.themes.Soft())
     )
 
 if __name__ == "__main__":
-    demo.launch()
+    demo.launch(share=True)
 
 
 
